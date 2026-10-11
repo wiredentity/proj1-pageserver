@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 import socket    # Basic TCP/IP communication on the internet
 import _thread   # Response computation runs concurrently with main program
 
+from pathlib import Path # For local path checking request files (html and css)
+import os #for file access
 
 def listen(portnum):
     """
@@ -59,15 +61,6 @@ def serve(sock, func):
         _thread.start_new_thread(func, (clientsocket,))
 
 
-##
-# Starter version only serves cat pictures. In fact, only a
-# particular cat picture.  This one.
-##
-CAT = """
-     ^ ^
-   =(   )=
-"""
-
 # HTTP response codes, as the strings we will actually send.
 # See:  https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
 # or    http://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html
@@ -76,6 +69,10 @@ STATUS_OK = "HTTP/1.0 200 OK\n\n"
 STATUS_FORBIDDEN = "HTTP/1.0 403 Forbidden\n\n"
 STATUS_NOT_FOUND = "HTTP/1.0 404 Not Found\n\n"
 STATUS_NOT_IMPLEMENTED = "HTTP/1.0 401 Not Implemented\n\n"
+
+# Forbidden Strings for Request Name
+
+FORBIDDEN_STR = ('/~','//','..')
 
 
 def respond(sock):
@@ -89,10 +86,45 @@ def respond(sock):
     log.info("--- Received request ----")
     log.info("Request was {}\n***\n".format(request))
 
+
     parts = request.split()
+    path = parts[1]
+
+
+    
     if len(parts) > 1 and parts[0] == "GET":
-        transmit(STATUS_OK, sock)
-        transmit(CAT, sock)
+
+        # Checks if forbidden substrings are in request string
+        if any(sub in request for sub in FORBIDDEN_STR):
+                transmit(STATUS_FORBIDDEN, sock)
+                sock.shutdown(socket.SHUT_RDWR)
+                sock.close()
+                return
+                
+        
+        if path.endswith(('.html', '.css')):
+
+            #checks request file format
+
+            options = get_options()
+            docroot = options.DOCROOT
+            localpath = os.path.join(docroot, path[1:]) #removes leading "/" and combines path and root
+            log.info("docroot is " + docroot + " localpath is " + localpath)
+
+            if not os.path.isfile(localpath):
+                transmit(STATUS_NOT_FOUND, sock)
+                transmit("File not found\n", sock)
+                sock.shutdown(socket.SHUT_RDWR)
+                sock.close()
+                return
+
+            with open(localpath, "r", encoding="utf-8") as file:
+                content = file.read()
+
+                transmit(STATUS_OK, sock)
+                transmit(content, sock)
+            
+
     else:
         log.info("Unhandled request: {}".format(request))
         transmit(STATUS_NOT_IMPLEMENTED, sock)
